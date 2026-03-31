@@ -4,8 +4,20 @@ import { StorageProvider } from './types';
 const BUCKET = 'clips';
 
 export class SupabaseStorageProvider implements StorageProvider {
+  private async ensureBucket(): Promise<void> {
+    const client = getSupabaseClient();
+    const { data: buckets } = await client.storage.listBuckets();
+    const exists = buckets?.some(b => b.name === BUCKET);
+    if (!exists) {
+      const { error } = await client.storage.createBucket(BUCKET, { public: true });
+      if (error) throw new Error(`Falha ao criar bucket: ${error.message}`);
+    }
+  }
+
   async upload(key: string, buffer: Buffer, contentType: string): Promise<string> {
     const client = getSupabaseClient();
+
+    await this.ensureBucket();
 
     const { error } = await client.storage
       .from(BUCKET)

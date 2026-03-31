@@ -29,7 +29,12 @@ function run(cmd: string, args: string[]): Promise<void> {
 }
 
 function sanitizeFilename(title: string): string {
-  return title.replace(/[^a-zA-Z0-9À-ÿ\s-]/g, '').replace(/\s+/g, '_').slice(0, 60);
+  return title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 60);
 }
 
 // Downloads only the specific time range and encodes it — used by the worker queue

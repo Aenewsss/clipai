@@ -23,6 +23,15 @@ const STEP_INDEX: Record<string, number> = {
   queued: 0, downloading: 0, transcribing: 1, analyzing: 2, done: 3,
 };
 
+const STORAGE_KEY = 'clipai_session';
+
+interface SavedSession {
+  jobId: string;
+  videoInfo: VideoInfo | null;
+  url: string;
+  style: Style;
+}
+
 export default function Home() {
   const [url, setUrl] = useState('');
   const [state, setState] = useState<AppState>('idle');
@@ -36,6 +45,99 @@ export default function Home() {
   const [enqueueing, setEnqueueing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cutPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const stopCutPolling = () => {
+    if (cutPollRef.current) { clearInterval(cutPollRef.current); cutPollRef.current = null; }
+  };
+
+  const startCutPolling = (jobId: string) => {
+    stopCutPolling();
+    cutPollRef.current = setInterval(async () => {
+      const res = await fetch(`/api/jobs/${jobId}/cuts`);
+      const data: Cut[] = await res.json();
+      setCuts(data);
+      const allDone = data.length > 0 && data.every(c => c.status === 'done' || c.status === 'error');
+      if (allDone) stopCutPolling();
+    }, 3000);
+  };
+
+  const startJobPolling = useCallback((jobId: string) => {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const statusRes = await fetch(`/api/jobs/${jobId}`);
+        const jobData: Job = await statusRes.json();
+        setJob(jobData);
+        setActiveStep(STEP_INDEX[jobData.step] ?? 0);
+
+        if (jobData.status === 'done') {
+          stopPolling();
+          setSelectedClips(new Set(jobData.clips?.map((_: ClipSuggestion, i: number) => i) ?? []));
+          setState('done');
+        } else if (jobData.status === 'error') {
+          stopPolling();
+          setError(jobData.error || 'Erro ao processar o vídeo');
+          setState('error');
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch {
+        // keep polling on transient errors
+      }
+    }, 3000);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+
+    let session: SavedSession;
+    try { session = JSON.parse(raw); } catch { return; }
+
+    const { jobId, videoInfo: savedVideoInfo, url: savedUrl, style: savedStyle } = session;
+    if (!jobId) return;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) { localStorage.removeItem(STORAGE_KEY); return; }
+        const jobData: Job = await res.json();
+
+        setUrl(savedUrl ?? '');
+        setStyle(savedStyle ?? 'viral');
+        if (savedVideoInfo) setVideoInfo(savedVideoInfo);
+
+        if (jobData.status === 'done') {
+          setJob(jobData);
+          setActiveStep(3);
+          setSelectedClips(new Set(jobData.clips?.map((_: ClipSuggestion, i: number) => i) ?? []));
+          setState('done');
+
+          // Restore cuts
+          const cutsRes = await fetch(`/api/jobs/${jobId}/cuts`);
+          if (cutsRes.ok) {
+            const cutsData: Cut[] = await cutsRes.json();
+            setCuts(cutsData);
+            const hasInProgress = cutsData.some(c => c.status === 'pending' || c.status === 'processing');
+            if (hasInProgress) startCutPolling(jobId);
+          }
+        } else if (jobData.status === 'processing' || jobData.status === 'pending') {
+          setJob(jobData);
+          setActiveStep(STEP_INDEX[jobData.step] ?? 0);
+          setState('processing');
+          startJobPolling(jobId);
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchVideoInfo = useCallback(async (videoUrl: string) => {
     try {
@@ -68,14 +170,6 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [url, fetchVideoInfo]);
 
-  const stopPolling = () => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-  };
-
-  const stopCutPolling = () => {
-    if (cutPollRef.current) { clearInterval(cutPollRef.current); cutPollRef.current = null; }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
@@ -97,26 +191,10 @@ export default function Home() {
 
       const jobId = data.jobId;
 
-      pollRef.current = setInterval(async () => {
-        try {
-          const statusRes = await fetch(`/api/jobs/${jobId}`);
-          const jobData: Job = await statusRes.json();
-          setJob(jobData);
-          setActiveStep(STEP_INDEX[jobData.step] ?? 0);
+      const session: SavedSession = { jobId, videoInfo, url: url.trim(), style };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
 
-          if (jobData.status === 'done') {
-            stopPolling();
-            setSelectedClips(new Set(jobData.clips?.map((_: ClipSuggestion, i: number) => i) ?? []));
-            setState('done');
-          } else if (jobData.status === 'error') {
-            stopPolling();
-            setError(jobData.error || 'Erro ao processar o vídeo');
-            setState('error');
-          }
-        } catch {
-          // keep polling on transient errors
-        }
-      }, 3000);
+      startJobPolling(jobId);
     } catch (err: any) {
       setError(err.message || 'Erro desconhecido');
       setState('error');
@@ -126,6 +204,7 @@ export default function Home() {
   const handleReset = () => {
     stopPolling();
     stopCutPolling();
+    localStorage.removeItem(STORAGE_KEY);
     setState('idle');
     setJob(null);
     setCuts([]);
@@ -143,17 +222,6 @@ export default function Home() {
       else next.add(index);
       return next;
     });
-  };
-
-  const startCutPolling = (jobId: string) => {
-    stopCutPolling();
-    cutPollRef.current = setInterval(async () => {
-      const res = await fetch(`/api/jobs/${jobId}/cuts`);
-      const data: Cut[] = await res.json();
-      setCuts(data);
-      const allDone = data.length > 0 && data.every(c => c.status === 'done' || c.status === 'error');
-      if (allDone) stopCutPolling();
-    }, 3000);
   };
 
   const handleCut = async () => {
@@ -196,7 +264,7 @@ export default function Home() {
     return 'low';
   };
 
-  const getYoutubeClipUrl = (videoId: string, start: number, end: number) => {
+  const getYoutubeClipUrl = (videoId: string, start: number) => {
     return `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(start)}s`;
   };
 
@@ -416,6 +484,24 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Video player when cut is ready */}
+                  {cut?.status === 'done' && cut.clip_url && (
+                    <div className="clip-video-wrapper">
+                      <video
+                        src={cut.clip_url}
+                        controls
+                        preload="metadata"
+                        style={{
+                          width: '100%',
+                          borderRadius: 8,
+                          marginTop: 12,
+                          background: '#000',
+                          maxHeight: 360,
+                        }}
+                      />
+                    </div>
+                  )}
+
                   <div className="clip-hook">
                     <div className="clip-hook-label">Gancho de abertura</div>
                     <p>"{clip.hook}"</p>
@@ -426,7 +512,7 @@ export default function Home() {
                   <div className="clip-actions">
                     {videoInfo?.videoId && (
                       <a
-                        href={getYoutubeClipUrl(videoInfo.videoId, clip.start_time, clip.end_time)}
+                        href={getYoutubeClipUrl(videoInfo.videoId, clip.start_time)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="clip-btn"
@@ -435,11 +521,13 @@ export default function Home() {
                       </a>
                     )}
                     {cut?.status === 'done' && cut.clip_url ? (
-                      <a href={cut.clip_url} target="_blank" rel="noopener noreferrer" className="clip-btn primary">
+                      <a href={cut.clip_url} download target="_blank" rel="noopener noreferrer" className="clip-btn primary">
                         ⬇ Baixar clip
                       </a>
                     ) : cut?.status === 'processing' ? (
                       <span className="clip-btn" style={{ opacity: 0.6, cursor: 'default' }}>✂️ Cortando...</span>
+                    ) : cut?.status === 'pending' ? (
+                      <span className="clip-btn" style={{ opacity: 0.6, cursor: 'default' }}>⏳ Na fila...</span>
                     ) : cut?.status === 'error' ? (
                       <span className="clip-btn" style={{ opacity: 0.6, cursor: 'default', color: 'red' }}>⚠ Erro no corte</span>
                     ) : (
