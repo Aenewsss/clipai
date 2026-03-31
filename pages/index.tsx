@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Head from 'next/head';
-import type { AnalyzeResponse, ClipSuggestion, CutClipResult } from '@/types';
+import type { Job, ClipSuggestion, CutClipResult } from '@/types';
 
 type AppState = 'idle' | 'loading-info' | 'processing' | 'done' | 'error';
 type Style = 'viral' | 'educational' | 'funny' | 'dramatic';
@@ -13,23 +13,28 @@ interface VideoInfo {
 }
 
 const STEPS = [
-  { key: 'download', label: 'Buscando legendas do vídeo', icon: '📥' },
-  { key: 'transcribe', label: 'Processando transcrição', icon: '🎙️' },
-  { key: 'analyze', label: 'IA analisando melhores momentos', icon: '🧠' },
+  { key: 'downloading', label: 'Baixando áudio do vídeo', icon: '📥' },
+  { key: 'transcribing', label: 'Transcrevendo com Whisper', icon: '🎙️' },
+  { key: 'analyzing', label: 'IA analisando melhores momentos', icon: '🧠' },
   { key: 'done', label: 'Cortes identificados!', icon: '✂️' },
 ];
+
+const STEP_INDEX: Record<string, number> = {
+  queued: 0, downloading: 0, transcribing: 1, analyzing: 2, done: 3,
+};
 
 export default function Home() {
   const [url, setUrl] = useState('');
   const [state, setState] = useState<AppState>('idle');
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [style, setStyle] = useState<Style>('viral');
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState('');
   const [activeStep, setActiveStep] = useState(0);
   const [selectedClips, setSelectedClips] = useState<Set<number>>(new Set());
   const [cutting, setCutting] = useState(false);
   const [cutResults, setCutResults] = useState<CutClipResult[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchVideoInfo = useCallback(async (videoUrl: string) => {
     try {
@@ -62,60 +67,61 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [url, fetchVideoInfo]);
 
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
 
     setState('processing');
     setError('');
-    setResult(null);
+    setJob(null);
     setActiveStep(0);
-
-    // Simulate step progression
-    const stepInterval = setInterval(() => {
-      setActiveStep(prev => {
-        if (prev < 2) return prev + 1;
-        return prev;
-      });
-    }, 3000);
+    stopPolling();
 
     try {
-      const res = await fetch('/api/analyze', {
+      const res = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: url.trim(),
-          minDuration: 60,
-          maxDuration: 90,
-          style,
-        }),
+        body: JSON.stringify({ url: url.trim(), style, min_duration: 60, max_duration: 90 }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao criar job');
 
-      clearInterval(stepInterval);
+      const jobId = data.jobId;
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Erro ao processar');
-      }
+      pollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/jobs/${jobId}`);
+          const jobData: Job = await statusRes.json();
+          setJob(jobData);
+          setActiveStep(STEP_INDEX[jobData.step] ?? 0);
 
-      const data: AnalyzeResponse = await res.json();
-      setActiveStep(3);
-      
-      setTimeout(() => {
-        setResult(data);
-        setSelectedClips(new Set(data.clips?.map((_: ClipSuggestion, i: number) => i) ?? []));
-        setState('done');
-      }, 800);
+          if (jobData.status === 'done') {
+            stopPolling();
+            setSelectedClips(new Set(jobData.clips?.map((_: ClipSuggestion, i: number) => i) ?? []));
+            setState('done');
+          } else if (jobData.status === 'error') {
+            stopPolling();
+            setError(jobData.error || 'Erro ao processar o vídeo');
+            setState('error');
+          }
+        } catch {
+          // keep polling on transient errors
+        }
+      }, 3000);
     } catch (err: any) {
-      clearInterval(stepInterval);
       setError(err.message || 'Erro desconhecido');
       setState('error');
     }
   };
 
   const handleReset = () => {
+    stopPolling();
     setState('idle');
-    setResult(null);
+    setJob(null);
     setError('');
     setUrl('');
     setVideoInfo(null);
@@ -134,18 +140,18 @@ export default function Home() {
   };
 
   const handleCut = async () => {
-    if (!result || !url || selectedClips.size === 0) return;
+    if (!job || !url || selectedClips.size === 0) return;
     setCutting(true);
     setCutResults([]);
     try {
-      const clipsTocut = result.clips
+      const clipsTocut = job.clips
         ?.filter((_, i) => selectedClips.has(i))
         .map(c => ({ start_time: c.start_time, end_time: c.end_time, title: c.title })) ?? [];
 
       const res = await fetch('/api/cut', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, jobId: result.jobId, clips: clipsTocut }),
+        body: JSON.stringify({ url, jobId: job.id, clips: clipsTocut }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao cortar clips');
@@ -351,15 +357,15 @@ export default function Home() {
       )}
 
       {/* RESULTS STATE */}
-      {state === 'done' && result && (
+      {state === 'done' && job && (
         <section className="results">
           <div className="results-header">
-            <h2>✂️ {result.clips?.length || 0} Cortes Identificados</h2>
-            <p>{result.title}</p>
+            <h2>✂️ {job.clips?.length || 0} Cortes Identificados</h2>
+            <p>{job.title}</p>
           </div>
 
           <div className="clips-grid">
-            {result.clips?.map((clip, i) => {
+            {job.clips?.map((clip, i) => {
               const cutResult = cutResults.find(r => r.title === clip.title);
               const isSelected = selectedClips.has(i);
               return (

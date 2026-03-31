@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "worker": "npx tsx --tsconfig worker/tsconfig.json worker/index.ts"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +18,7 @@
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@vercel/blob": "^2.3.2",
+    "dotenv": "^17.3.1",
     "framer-motion": "^12.38.0",
     "groq-sdk": "^1.1.2",
     "lucide-react": "^1.7.0",
@@ -24,5 +26,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^6.0.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
   }
 }

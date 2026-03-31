@@ -1,18 +1,11 @@
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseClient } from '@/lib/supabase';
 import { StorageProvider } from './types';
 
 const BUCKET = 'clips';
 
-function getClient() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios');
-  return createClient(url, key);
-}
-
 export class SupabaseStorageProvider implements StorageProvider {
   async upload(key: string, buffer: Buffer, contentType: string): Promise<string> {
-    const client = getClient();
+    const client = getSupabaseClient();
 
     const { error } = await client.storage
       .from(BUCKET)
@@ -25,7 +18,7 @@ export class SupabaseStorageProvider implements StorageProvider {
   }
 
   async cleanup(maxAgeMs: number): Promise<number> {
-    const client = getClient();
+    const client = getSupabaseClient();
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
 
     const { data: folders } = await client.storage.from(BUCKET).list('', { limit: 1000 });

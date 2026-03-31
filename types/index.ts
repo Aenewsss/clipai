@@ -30,6 +30,25 @@ export interface CutResponse {
   clips: CutClipResult[];
 }
 
+export type JobStep = 'queued' | 'downloading' | 'transcribing' | 'analyzing' | 'done' | 'error';
+export type JobStatus = 'pending' | 'processing' | 'done' | 'error';
+
+export interface Job {
+  id: string;
+  url: string;
+  style: string;
+  min_duration: number;
+  max_duration: number;
+  status: JobStatus;
+  step: JobStep;
+  title?: string;
+  transcript?: TranscriptSegment[];
+  clips?: ClipSuggestion[];
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface VideoJob {
   id: string;
   url: string;
