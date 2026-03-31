@@ -32,6 +32,46 @@ function sanitizeFilename(title: string): string {
   return title.replace(/[^a-zA-Z0-9À-ÿ\s-]/g, '').replace(/\s+/g, '_').slice(0, 60);
 }
 
+// Downloads only the specific time range and encodes it — used by the worker queue
+export async function downloadAndCutClip(
+  url: string,
+  clip: ClipInput,
+  index: number
+): Promise<CutResult> {
+  const id = randomBytes(6).toString('hex');
+  const tmpDir = join(tmpdir(), `clipai_${id}`);
+  await mkdir(tmpDir, { recursive: true });
+
+  const filename = `${String(index + 1).padStart(2, '0')}_${sanitizeFilename(clip.title)}.mp4`;
+  const rawPath = join(tmpDir, 'raw.mp4');
+  const outputPath = join(tmpDir, filename);
+
+  // Download only the needed section
+  await run('python3', [
+    '-m', 'yt_dlp',
+    '--download-sections', `*${clip.start_time}-${clip.end_time}`,
+    '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    '--merge-output-format', 'mp4',
+    '--no-playlist',
+    '-o', rawPath,
+    url,
+  ]);
+
+  // Re-encode for compatibility
+  await run('ffmpeg', [
+    '-i', rawPath,
+    '-c:v', 'libx264', '-c:a', 'aac',
+    '-movflags', '+faststart',
+    '-y', outputPath,
+  ]);
+
+  const buffer = await readFile(outputPath);
+  unlink(rawPath).catch(() => {});
+  unlink(outputPath).catch(() => {});
+
+  return { title: clip.title, filename, buffer };
+}
+
 export async function cutClips(url: string, clips: ClipInput[]): Promise<CutResult[]> {
   const id = randomBytes(6).toString('hex');
   const tmpDir = join(tmpdir(), `clipai_${id}`);

@@ -3,9 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { downloadYouTubeAudio } from '../lib/youtube-audio';
 import { transcribeAudio } from '../lib/transcription';
 import { analyzeTranscript } from '../lib/analyzer';
+import { downloadAndCutClip } from '../lib/clip-cutter';
 import { getVideoInfo } from '../lib/youtube';
 import { createLLMProvider } from '../lib/providers/llm';
 import { createTranscriptionProvider } from '../lib/providers/transcription';
+import { createStorageProvider } from '../lib/providers/storage';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -50,7 +52,39 @@ async function processJob(supabase: ReturnType<typeof getClient>, job: any) {
   }
 }
 
+async function processCut(supabase: ReturnType<typeof getClient>, cut: any) {
+  const { id, job_id, clip_index, title, start_time, end_time } = cut;
+  console.log(`[worker] Cutting clip ${clip_index + 1}: ${title}`);
+
+  await supabase.from('cuts')
+    .update({ status: 'processing', updated_at: new Date().toISOString() })
+    .eq('id', id);
+
+  try {
+    const { data: job } = await supabase.from('jobs').select('url').eq('id', job_id).single();
+    if (!job) throw new Error('Job não encontrado');
+
+    const storage = createStorageProvider();
+    const result = await downloadAndCutClip(job.url, { start_time, end_time, title }, clip_index);
+
+    const key = `${job_id}/${result.filename}`;
+    const clipUrl = await storage.upload(key, result.buffer, 'video/mp4');
+
+    await supabase.from('cuts').update({
+      status: 'done', clip_url: clipUrl, updated_at: new Date().toISOString(),
+    }).eq('id', id);
+
+    console.log(`[worker] Cut done: ${title} → ${clipUrl}`);
+  } catch (err: any) {
+    console.error(`[worker] Cut ${id} failed:`, err.message);
+    await supabase.from('cuts').update({
+      status: 'error', error: err.message, updated_at: new Date().toISOString(),
+    }).eq('id', id);
+  }
+}
+
 async function poll(supabase: ReturnType<typeof getClient>) {
+  // Process one analyze job at a time
   const { data: jobs } = await supabase
     .from('jobs')
     .select('*')
@@ -58,9 +92,17 @@ async function poll(supabase: ReturnType<typeof getClient>) {
     .order('created_at', { ascending: true })
     .limit(1);
 
-  if (jobs?.length) {
-    await processJob(supabase, jobs[0]);
-  }
+  if (jobs?.length) await processJob(supabase, jobs[0]);
+
+  // Process one cut at a time
+  const { data: cuts } = await supabase
+    .from('cuts')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(1);
+
+  if (cuts?.length) await processCut(supabase, cuts[0]);
 }
 
 async function main() {

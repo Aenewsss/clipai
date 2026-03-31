@@ -30,6 +30,21 @@ export interface CutResponse {
   clips: CutClipResult[];
 }
 
+export type CutStatus = 'pending' | 'processing' | 'done' | 'error';
+
+export interface Cut {
+  id: string;
+  job_id: string;
+  clip_index: number;
+  title: string;
+  start_time: number;
+  end_time: number;
+  status: CutStatus;
+  clip_url?: string;
+  error?: string;
+  created_at: string;
+}
+
 export type JobStep = 'queued' | 'downloading' | 'transcribing' | 'analyzing' | 'done' | 'error';
 export type JobStatus = 'pending' | 'processing' | 'done' | 'error';
 

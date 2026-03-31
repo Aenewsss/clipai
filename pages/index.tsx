@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import Head from 'next/head';
-import type { Job, ClipSuggestion, CutClipResult } from '@/types';
+import type { Job, Cut, ClipSuggestion } from '@/types';
 
 type AppState = 'idle' | 'loading-info' | 'processing' | 'done' | 'error';
 type Style = 'viral' | 'educational' | 'funny' | 'dramatic';
@@ -32,9 +32,10 @@ export default function Home() {
   const [error, setError] = useState('');
   const [activeStep, setActiveStep] = useState(0);
   const [selectedClips, setSelectedClips] = useState<Set<number>>(new Set());
-  const [cutting, setCutting] = useState(false);
-  const [cutResults, setCutResults] = useState<CutClipResult[]>([]);
+  const [cuts, setCuts] = useState<Cut[]>([]);
+  const [enqueueing, setEnqueueing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cutPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchVideoInfo = useCallback(async (videoUrl: string) => {
     try {
@@ -69,6 +70,10 @@ export default function Home() {
 
   const stopPolling = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const stopCutPolling = () => {
+    if (cutPollRef.current) { clearInterval(cutPollRef.current); cutPollRef.current = null; }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -120,14 +125,15 @@ export default function Home() {
 
   const handleReset = () => {
     stopPolling();
+    stopCutPolling();
     setState('idle');
     setJob(null);
+    setCuts([]);
     setError('');
     setUrl('');
     setVideoInfo(null);
     setActiveStep(0);
     setSelectedClips(new Set());
-    setCutResults([]);
   };
 
   const toggleClip = (index: number) => {
@@ -139,27 +145,42 @@ export default function Home() {
     });
   };
 
-  const handleCut = async () => {
-    if (!job || !url || selectedClips.size === 0) return;
-    setCutting(true);
-    setCutResults([]);
-    try {
-      const clipsTocut = job.clips
-        ?.filter((_, i) => selectedClips.has(i))
-        .map(c => ({ start_time: c.start_time, end_time: c.end_time, title: c.title })) ?? [];
+  const startCutPolling = (jobId: string) => {
+    stopCutPolling();
+    cutPollRef.current = setInterval(async () => {
+      const res = await fetch(`/api/jobs/${jobId}/cuts`);
+      const data: Cut[] = await res.json();
+      setCuts(data);
+      const allDone = data.length > 0 && data.every(c => c.status === 'done' || c.status === 'error');
+      if (allDone) stopCutPolling();
+    }, 3000);
+  };
 
-      const res = await fetch('/api/cut', {
+  const handleCut = async () => {
+    if (!job || selectedClips.size === 0) return;
+    setEnqueueing(true);
+    setCuts([]);
+    stopCutPolling();
+    try {
+      const clipsToEnqueue = job.clips
+        ?.filter((_, i) => selectedClips.has(i))
+        .map((c, arrIdx) => {
+          const originalIdx = [...selectedClips].sort((a, b) => a - b)[arrIdx];
+          return { clip_index: originalIdx, title: c.title, start_time: c.start_time, end_time: c.end_time };
+        }) ?? [];
+
+      const res = await fetch(`/api/jobs/${job.id}/cuts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, jobId: job.id, clips: clipsTocut }),
+        body: JSON.stringify({ clips: clipsToEnqueue }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro ao cortar clips');
-      setCutResults(data.clips);
+      if (!res.ok) throw new Error((await res.json()).error || 'Erro ao enfileirar cortes');
+
+      startCutPolling(job.id);
     } catch (err: any) {
       setError(err.message);
     } finally {
-      setCutting(false);
+      setEnqueueing(false);
     }
   };
 
@@ -366,7 +387,7 @@ export default function Home() {
 
           <div className="clips-grid">
             {job.clips?.map((clip, i) => {
-              const cutResult = cutResults.find(r => r.title === clip.title);
+              const cut = cuts.find(c => c.clip_index === i);
               const isSelected = selectedClips.has(i);
               return (
                 <div
@@ -413,10 +434,14 @@ export default function Home() {
                         ▶ Ver no YouTube
                       </a>
                     )}
-                    {cutResult ? (
-                      <a href={cutResult.url} download={cutResult.filename} className="clip-btn primary">
+                    {cut?.status === 'done' && cut.clip_url ? (
+                      <a href={cut.clip_url} target="_blank" rel="noopener noreferrer" className="clip-btn primary">
                         ⬇ Baixar clip
                       </a>
+                    ) : cut?.status === 'processing' ? (
+                      <span className="clip-btn" style={{ opacity: 0.6, cursor: 'default' }}>✂️ Cortando...</span>
+                    ) : cut?.status === 'error' ? (
+                      <span className="clip-btn" style={{ opacity: 0.6, cursor: 'default', color: 'red' }}>⚠ Erro no corte</span>
                     ) : (
                       <button
                         className="clip-btn"
@@ -437,26 +462,22 @@ export default function Home() {
           {/* Cut / Download actions */}
           <div style={{ textAlign: 'center', marginTop: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
             {error && <div className="error-box">{error}</div>}
-            {cutResults.length === 0 ? (
-              <button
-                className="clip-btn primary"
-                style={{ padding: '14px 32px', fontSize: '1rem' }}
-                disabled={cutting || selectedClips.size === 0}
-                onClick={handleCut}
-              >
-                {cutting
-                  ? `✂️ Cortando ${selectedClips.size} clips... (pode demorar)`
+            <button
+              className="clip-btn primary"
+              style={{ padding: '14px 32px', fontSize: '1rem' }}
+              disabled={enqueueing || selectedClips.size === 0}
+              onClick={handleCut}
+            >
+              {enqueueing
+                ? 'Enfileirando...'
+                : cuts.length > 0
+                  ? `✂️ Re-enfileirar ${selectedClips.size} corte${selectedClips.size !== 1 ? 's' : ''}`
                   : `✂️ Gerar ${selectedClips.size} corte${selectedClips.size !== 1 ? 's' : ''} selecionado${selectedClips.size !== 1 ? 's' : ''}`}
-              </button>
-            ) : (
-              <button
-                className="clip-btn primary"
-                style={{ padding: '14px 32px', fontSize: '1rem' }}
-                onClick={handleCut}
-                disabled={cutting || selectedClips.size === 0}
-              >
-                ✂️ Regenerar cortes selecionados
-              </button>
+            </button>
+            {cuts.length > 0 && (
+              <p style={{ opacity: 0.6, fontSize: '0.85rem' }}>
+                {cuts.filter(c => c.status === 'done').length}/{cuts.length} cortes prontos — worker processando um a um
+              </p>
             )}
           </div>
 
