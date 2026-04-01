@@ -9,7 +9,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const user = await requireUser(req, res);
   if (!user) return;
 
-  const { cutIds, platforms } = req.body as { cutIds: string[]; platforms: SocialPlatform[] };
+  const { cutIds, platforms, scheduledAt, overrides } = req.body as {
+    cutIds: string[];
+    platforms: SocialPlatform[];
+    scheduledAt?: string;
+    overrides?: Record<string, { title?: string; description?: string }>;
+  };
   if (!cutIds?.length || !platforms?.length) {
     return res.status(400).json({ error: 'cutIds e platforms são obrigatórios' });
   }
@@ -48,11 +53,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (existing) continue;
 
+      const ov = overrides?.[cut.id];
       rows.push({
         cut_id: cut.id,
         social_account_id: account.id,
         platform: account.platform,
         status: 'pending',
+        ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
+        ...(ov?.title ? { custom_title: ov.title } : {}),
+        ...(ov?.description ? { custom_description: ov.description } : {}),
       });
     }
   }

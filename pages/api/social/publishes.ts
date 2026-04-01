@@ -15,7 +15,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (cutId) {
     const { data, error } = await supabase
       .from('publishes')
-      .select('id, cut_id, platform, status, platform_post_id, platform_post_url, error, created_at, updated_at')
+      .select('id, cut_id, platform, status, platform_post_id, platform_post_url, error, scheduled_at, created_at, updated_at')
       .eq('cut_id', cutId)
       .order('created_at');
     if (error) return res.status(500).json({ error: error.message });
@@ -34,7 +34,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const cutIds = cuts.map(c => c.id);
     const { data, error } = await supabase
       .from('publishes')
-      .select('id, cut_id, platform, status, platform_post_id, platform_post_url, error, created_at, updated_at')
+      .select('id, cut_id, platform, status, platform_post_id, platform_post_url, error, scheduled_at, created_at, updated_at')
       .in('cut_id', cutIds)
       .order('created_at');
 

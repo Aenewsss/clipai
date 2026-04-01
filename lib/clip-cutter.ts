@@ -3,6 +3,7 @@ import { readFile, unlink, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
+import { generateVerticalClip } from './vertical-crop';
 
 interface ClipInput {
   start_time: number;
@@ -14,6 +15,8 @@ interface CutResult {
   title: string;
   filename: string;
   buffer: Buffer;
+  verticalBuffer?: Buffer;
+  verticalFilename?: string;
 }
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -62,19 +65,34 @@ export async function downloadAndCutClip(
     url,
   ]);
 
-  // Re-encode for compatibility
+  // Re-encode for compatibility and size (cap 720p, CRF 28)
   await run('ffmpeg', [
     '-i', rawPath,
-    '-c:v', 'libx264', '-c:a', 'aac',
+    '-c:v', 'libx264', '-crf', '28', '-preset', 'fast',
+    '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease",
+    '-c:a', 'aac', '-b:a', '128k',
     '-movflags', '+faststart',
     '-y', outputPath,
   ]);
 
   const buffer = await readFile(outputPath);
+
+  // Generate vertical (9:16) version for Reels/Shorts/TikTok
+  const verticalFilename = `vertical_${filename}`;
+  const verticalPath = join(tmpDir, verticalFilename);
+  let verticalBuffer: Buffer | undefined;
+  try {
+    await generateVerticalClip(outputPath, verticalPath);
+    verticalBuffer = await readFile(verticalPath);
+    unlink(verticalPath).catch(() => {});
+  } catch (err: any) {
+    console.error(`[clip-cutter] Vertical generation failed: ${err.message}`);
+  }
+
   unlink(rawPath).catch(() => {});
   unlink(outputPath).catch(() => {});
 
-  return { title: clip.title, filename, buffer };
+  return { title: clip.title, filename, buffer, verticalBuffer, verticalFilename };
 }
 
 export async function cutClips(url: string, clips: ClipInput[]): Promise<CutResult[]> {

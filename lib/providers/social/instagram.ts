@@ -1,6 +1,6 @@
 import type { SocialProvider, PublishOptions, PublishResult, TokenRefreshResult } from './types';
 
-const GRAPH_API = 'https://graph.facebook.com/v19.0';
+const GRAPH_API = 'https://graph.instagram.com/v21.0';
 
 export class InstagramProvider implements SocialProvider {
   platform = 'instagram' as const;
@@ -10,7 +10,7 @@ export class InstagramProvider implements SocialProvider {
 
     // 1. Create media container
     const containerRes = await fetch(
-      `${GRAPH_API}/${platformUserId}/media`,
+      `${GRAPH_API}/${platformUserId}/media?access_token=${accessToken}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -19,7 +19,6 @@ export class InstagramProvider implements SocialProvider {
           video_url: videoUrl,
           caption: title,
           share_to_feed: true,
-          access_token: accessToken,
         }),
       }
     );
@@ -37,13 +36,12 @@ export class InstagramProvider implements SocialProvider {
 
     // 3. Publish
     const publishRes = await fetch(
-      `${GRAPH_API}/${platformUserId}/media_publish`,
+      `${GRAPH_API}/${platformUserId}/media_publish?access_token=${accessToken}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           creation_id: containerId,
-          access_token: accessToken,
         }),
       }
     );

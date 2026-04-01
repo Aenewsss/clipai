@@ -41,6 +41,7 @@ export interface Cut {
   end_time: number;
   status: CutStatus;
   clip_url?: string;
+  clip_vertical_url?: string;
   error?: string;
   created_at: string;
 }
@@ -91,6 +92,16 @@ export interface AnalyzeResponse {
   error?: string;
 }
 
+// Planos e assinaturas
+export type PlanStatus = 'free' | 'pro';
+
+export interface UserPlanInfo {
+  plan: PlanStatus;
+  cutsThisMonth: number;
+  cutsLimit: number | null;
+  canCut: boolean;
+}
+
 // Social media
 export type SocialPlatform = 'tiktok' | 'instagram' | 'youtube';
 export type PublishStatus = 'pending' | 'processing' | 'done' | 'error';
@@ -112,6 +123,9 @@ export interface Publish {
   platform_post_id?: string;
   platform_post_url?: string;
   error?: string;
+  scheduled_at?: string;
+  custom_title?: string;
+  custom_description?: string;
   created_at: string;
   updated_at: string;
 }

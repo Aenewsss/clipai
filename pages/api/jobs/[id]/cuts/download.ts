@@ -30,10 +30,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!cut.clip_url) continue;
     try {
       const fileRes = await fetch(cut.clip_url);
-      if (!fileRes.ok || !fileRes.body) continue;
+      if (!fileRes.ok) continue;
 
       const filename = `${String(cut.clip_index + 1).padStart(2, '0')}_${cut.title.slice(0, 50).replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_')}.mp4`;
-      archive.append(fileRes.body as any, { name: filename });
+      const buffer = Buffer.from(await fileRes.arrayBuffer());
+      archive.append(buffer, { name: filename });
     } catch {
       // skip failed files
     }
