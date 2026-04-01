@@ -61,6 +61,7 @@ export async function downloadAndCutClip(
     '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
     '--merge-output-format', 'mp4',
     '--no-playlist',
+    '--extractor-args', 'youtube:player_client=ios',
     '-o', rawPath,
     url,
   ]);
@@ -108,6 +109,7 @@ export async function cutClips(url: string, clips: ClipInput[]): Promise<CutResu
     '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
     '--merge-output-format', 'mp4',
     '--no-playlist',
+    '--extractor-args', 'youtube:player_client=ios',
     '-o', videoPath,
     url,
   ]);

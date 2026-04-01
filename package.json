@@ -7,7 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "worker": "npx tsx --tsconfig worker/tsconfig.json worker/index.ts"
+    "worker": "npx tsx --tsconfig worker/tsconfig.json worker/index.ts",
+    "build:worker": "esbuild worker/index.ts --bundle --platform=node --format=cjs --outfile=dist/worker.js --alias:@=. --external:cpu-features --external:fsevents --loader:.py=file"
   },
   "keywords": [],
   "author": "",
@@ -35,6 +36,7 @@
     "typescript": "^6.0.2"
   },
   "devDependencies": {
+    "esbuild": "^0.27.4",
     "tsx": "^4.21.0"
   }
 }
