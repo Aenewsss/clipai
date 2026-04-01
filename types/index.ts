@@ -90,3 +90,28 @@ export interface AnalyzeResponse {
   clips?: ClipSuggestion[];
   error?: string;
 }
+
+// Social media
+export type SocialPlatform = 'tiktok' | 'instagram' | 'youtube';
+export type PublishStatus = 'pending' | 'processing' | 'done' | 'error';
+
+export interface SocialAccount {
+  id: string;
+  platform: SocialPlatform;
+  platform_user_id: string;
+  platform_username: string;
+  token_expires_at?: string;
+  created_at: string;
+}
+
+export interface Publish {
+  id: string;
+  cut_id: string;
+  platform: SocialPlatform;
+  status: PublishStatus;
+  platform_post_id?: string;
+  platform_post_url?: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
