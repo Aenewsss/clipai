@@ -16,7 +16,7 @@ export async function downloadYouTubeAudio(url: string): Promise<{ buffer: Buffe
       '--audio-format', 'mp3',
       '--audio-quality', '5',
       '--no-playlist',
-      '--extractor-args', 'youtube:player_client=web_creator',
+      ...(process.env.YTDLP_COOKIES_FILE ? ['--cookies', process.env.YTDLP_COOKIES_FILE] : ['--extractor-args', 'youtube:player_client=web_creator']),
       '-o', outputTemplate,
       url,
     ]);
