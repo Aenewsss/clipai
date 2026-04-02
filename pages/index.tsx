@@ -701,7 +701,7 @@ export default function Home() {
         </section>
       ) : (
         /* Active jobs layout */
-        <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 24px 60px' }}>
+        <div style={{ maxWidth: 960, margin: '0 auto', padding: '88px 24px 60px' }}>
           {/* Compact URL input bar */}
           <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
             <form onSubmit={handleSubmit}>
